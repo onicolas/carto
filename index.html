@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Balise - carte de randonnée hors ligne</title>
+  <meta name="description" content="Carte IGN et tracés de randonnée consultables sans réseau.">
+  <meta name="theme-color" content="#16302b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Balise">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="map" aria-label="Carte"></div>
+
+  <!-- État : réseau et fond de carte -->
+  <div id="status" aria-live="polite">
+    <span id="chip-net" class="chip chip-off" hidden>Hors ligne</span>
+    <span id="chip-layer" class="chip">Plan IGN</span>
+  </div>
+
+  <!-- Commandes de carte -->
+  <div id="controls">
+    <button id="btn-compass" class="round" type="button" aria-label="Boussole et nord" aria-pressed="false">
+      <svg id="needle" viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
+        <polygon points="24,5 31,24 17,24" fill="#d9480f"/>
+        <polygon points="24,43 31,24 17,24" fill="currentColor" opacity=".55"/>
+        <circle cx="24" cy="24" r="2.6" fill="#fff"/>
+      </svg>
+      <span class="round-tag" id="compass-tag">N</span>
+    </button>
+    <button id="btn-locate" class="round" type="button" aria-label="Ma position" aria-pressed="false">
+      <svg viewBox="0 0 48 48" width="30" height="30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round">
+        <circle cx="24" cy="24" r="11"/>
+        <circle cx="24" cy="24" r="3.6" fill="currentColor" stroke="none"/>
+        <path d="M24 4v7M24 37v7M4 24h7M37 24h7"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Coordonnées de la position -->
+  <div id="readout" hidden>
+    <div id="readout-coord"></div>
+    <div id="readout-alt"></div>
+  </div>
+
+  <!-- Cadre de sélection de la zone à télécharger -->
+  <div id="frame" hidden><span>Zone à télécharger</span></div>
+  <form id="framebar" hidden autocomplete="off">
+    <p id="frame-help">Déplacez et zoomez la carte pour placer la zone dans le cadre.</p>
+    <label class="field">
+      <span>Nom de la zone</span>
+      <input id="zone-name" type="text" maxlength="40" enterkeyhint="done">
+    </label>
+    <label class="field">
+      <span>Niveau de détail</span>
+      <select id="zone-level"></select>
+    </label>
+    <p id="frame-estimate" class="estimate"></p>
+    <div class="row">
+      <button type="button" id="frame-cancel" class="btn">Annuler</button>
+      <button type="submit" id="frame-go" class="btn btn-primary">Télécharger</button>
+    </div>
+  </form>
+
+  <!-- Progression du téléchargement -->
+  <div id="progress" hidden role="status">
+    <strong id="progress-title">Téléchargement</strong>
+    <div class="bar"><div id="progress-fill"></div></div>
+    <p id="progress-text"></p>
+    <button type="button" id="progress-cancel" class="btn">Arrêter</button>
+  </div>
+
+  <!-- Panneau : cartes hors ligne -->
+  <section id="sheet-offline" class="sheet" hidden aria-label="Cartes hors ligne">
+    <header><h2>Cartes hors ligne</h2><button type="button" class="sheet-close" aria-label="Fermer">Fermer</button></header>
+    <div class="sheet-body">
+      <form id="search-form" class="search" autocomplete="off">
+        <input id="search-input" type="search" placeholder="Chercher un lieu, une commune, un sommet" enterkeyhint="search" aria-label="Chercher un lieu">
+        <button type="submit" class="btn">Chercher</button>
+      </form>
+      <ul id="search-results" class="list"></ul>
+
+      <div class="actions">
+        <button type="button" id="btn-zone-frame" class="btn btn-primary btn-block">Télécharger une zone de la carte</button>
+        <button type="button" id="btn-zone-track" class="btn btn-block" hidden>Télécharger autour des tracés affichés</button>
+      </div>
+      <p class="hint" id="offline-hint">Téléchargez la carte avec une bonne connexion, avant de partir. Elle reste ensuite disponible sans réseau.</p>
+
+      <h3>Zones téléchargées</h3>
+      <ul id="zone-list" class="list"></ul>
+      <p id="storage-info" class="hint"></p>
+    </div>
+  </section>
+
+  <!-- Panneau : tracés -->
+  <section id="sheet-tracks" class="sheet" hidden aria-label="Tracés">
+    <header><h2>Tracés</h2><button type="button" class="sheet-close" aria-label="Fermer">Fermer</button></header>
+    <div class="sheet-body">
+      <div class="actions">
+        <label class="btn btn-primary btn-block" for="gpx-input">Importer un fichier GPX</label>
+        <input id="gpx-input" type="file" multiple hidden>
+      </div>
+      <p class="hint">Le tracé est enregistré dans l'appareil et reste visible sans réseau.</p>
+      <ul id="track-list" class="list"></ul>
+    </div>
+  </section>
+
+  <!-- Panneau : réglages -->
+  <section id="sheet-settings" class="sheet" hidden aria-label="Réglages">
+    <header><h2>Réglages</h2><button type="button" class="sheet-close" aria-label="Fermer">Fermer</button></header>
+    <div class="sheet-body">
+      <h3>Fond de carte</h3>
+      <div class="segmented" role="radiogroup" aria-label="Fond de carte">
+        <button type="button" data-layer="plan" role="radio" aria-checked="true">Plan IGN</button>
+        <button type="button" data-layer="scan" role="radio" aria-checked="false">SCAN 25</button>
+      </div>
+      <div id="scan-box">
+        <label class="field">
+          <span>Clé d'accès SCAN 25 (Géoplateforme)</span>
+          <input id="scan-key" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Votre clé">
+        </label>
+        <p class="hint">Le SCAN 25 est une donnée à accès restreint de l'IGN. Sa consultation en ligne demande une clé, et son stockage hors ligne n'est pas couvert par la licence ouverte&nbsp;: vérifiez vos droits auprès de l'IGN. Le Plan IGN, lui, est libre et sans clé.</p>
+      </div>
+
+      <h3>Sur le terrain</h3>
+      <label class="switch">
+        <input id="opt-offline" type="checkbox">
+        <span>Mode hors ligne forcé<small>N'utilise que les cartes téléchargées, sans chercher le réseau. Économise la batterie.</small></span>
+      </label>
+      <label class="switch">
+        <input id="opt-wake" type="checkbox">
+        <span>Garder l'écran allumé<small>Tant que l'application est au premier plan.</small></span>
+      </label>
+
+      <h3>Installation</h3>
+      <button type="button" id="btn-install" class="btn btn-block" hidden>Installer l'application</button>
+      <p class="hint" id="install-hint"></p>
+
+      <h3>À propos</h3>
+      <p class="hint">Fonds de carte&nbsp;: © IGN, Géoplateforme. Moteur cartographique&nbsp;: MapLibre GL JS. La position vient du GPS du téléphone et fonctionne sans réseau. Cette application ne remplace ni une carte papier ni une boussole.</p>
+      <p class="hint" id="version-info"></p>
+    </div>
+  </section>
+
+  <nav id="tabbar" aria-label="Navigation">
+    <button type="button" data-sheet="" class="tab is-active">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M9 4 3 6.5v13.5l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></svg>
+      <span>Carte</span>
+    </button>
+    <button type="button" data-sheet="sheet-offline" class="tab">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 11 12 15.5 16.5 11M5 20h14"/></svg>
+      <span>Hors ligne</span>
+    </button>
+    <button type="button" data-sheet="sheet-tracks" class="tab">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8 17c5-1 2-9 8-10"/></svg>
+      <span>Tracés</span>
+    </button>
+    <button type="button" data-sheet="sheet-settings" class="tab">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h12M20 17h0"/><circle cx="16" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="18" cy="17" r="2"/></svg>
+      <span>Réglages</span>
+    </button>
+  </nav>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="vendor/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
